@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FoodShare - Shelter</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FoodShare <span class="tag">Shelter</span></div>
+    <div class="user"><span id="user-name"></span> <button class="btn btn-small btn-secondary" id="logout-btn">Log out</button></div>
+  </header>
+
+  <main class="container">
+    <div id="notify-banner" class="banner hidden">
+      Turn on notifications so you hear about new food even when this tab is in the background.
+      <button class="btn btn-small" id="notify-btn">Turn on notifications</button>
+    </div>
+
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head">
+          <h2>Food near you <span class="muted small">(within 10 km)</span></h2>
+          <span class="live" id="live-status">connecting...</span>
+        </div>
+        <div id="feed" class="list"><p class="muted">Loading...</p></div>
+      </section>
+
+      <section class="card">
+        <h2>My pickups</h2>
+        <div id="pickups" class="list"><p class="muted">Loading...</p></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.9/dist/axios.min.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    const feedEl = document.getElementById('feed');
+    const pickupsEl = document.getElementById('pickups');
+    let feed = [];
+
+    function renderFeed() {
+      // Posts auto-hide once their expiry time passes
+      feed = feed.filter((post) => !isExpired(post));
+      if (!feed.length) {
+        feedEl.innerHTML = '<p class="muted">No food available nearby right now. You will be notified when something is posted.</p>';
+        return;
+      }
+      feedEl.innerHTML = feed.map((post) => `
+        <article class="post">
+          <div class="post-head">
+            <h3>${escapeHtml(post.description)}</h3>
+            <span class="distance">${post.distanceKm} km</span>
+          </div>
+          <p class="muted">${escapeHtml(post.quantity)} &middot; from ${escapeHtml(post.donorName)}</p>
+          <p class="muted">Good until ${formatTime(post.expiresAt)} (${timeLeft(post.expiresAt)})</p>
+          <div class="actions">
+            <button class="btn" data-claim="${post.id}">Claim</button>
+            <a href="${mapLink(post)}" target="_blank" rel="noopener">View on map</a>
+          </div>
+        </article>`).join('');
+    }
+
+    async function loadFeed() {
+      try {
+        const { data } = await api.get('/posts/nearby');
+        feed = data;
+        renderFeed();
+      } catch (err) {
+        feedEl.innerHTML = `<p class="error">${escapeHtml(errorMessage(err))}</p>`;
+      }
+    }
+
+    async function loadPickups() {
+      try {
+        const { data } = await api.get('/posts/claimed');
+        pickupsEl.innerHTML = data.length ? data.map((post) => `
+          <article class="post">
+            <div class="post-head">
+              <h3>${escapeHtml(post.description)}</h3>
+              <span class="badge badge-claimed">CLAIMED</span>
+            </div>
+            <p class="muted">${escapeHtml(post.quantity)} &middot; claimed ${formatTime(post.claimedAt)}</p>
+            ${contactHtml('Pick up from', post.donorContact)}
+            <a href="${mapLink(post)}" target="_blank" rel="noopener">Directions</a>
+          </article>`).join('') : '<p class="muted">You have not claimed any food yet.</p>';
+      } catch (err) {
+        pickupsEl.innerHTML = `<p class="error">${escapeHtml(errorMessage(err))}</p>`;
+      }
+    }
+
+    feedEl.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-claim]');
+      if (!button) return;
+      button.disabled = true;
+      button.textContent = 'Claiming...';
+      try {
+        await api.post(`/posts/${button.dataset.claim}/claim`);
+        showToast('Claimed! The donor can now see your contact details.');
+        loadPickups();
+      } catch (err) {
+        showToast(errorMessage(err), 'error');
+      }
+      loadFeed();
+    });
+
+    function setupNotificationBanner() {
+      const banner = document.getElementById('notify-banner');
+      if (!('Notification' in window) || Notification.permission !== 'default') return;
+      banner.classList.remove('hidden');
+      document.getElementById('notify-btn').addEventListener('click', async () => {
+        await Notification.requestPermission();
+        banner.classList.add('hidden');
+      });
+    }
+
+    (async () => {
+      const user = await requireUser('SHELTER');
+      if (!user) return;
+      showUserName(user);
+      setupNotificationBanner();
+      loadFeed();
+      loadPickups();
+
+      const liveStatus = document.getElementById('live-status');
+      const events = connectEvents({
+        'connected': () => { liveStatus.textContent = 'live'; liveStatus.classList.add('on'); },
+        'new-post': (post) => {
+          notify('New food nearby!', `${post.description} (${post.distanceKm} km away)`);
+          loadFeed();
+        },
+        'post-removed': ({ id }) => {
+          feed = feed.filter((post) => post.id !== id);
+          renderFeed();
+        },
+      });
+      events.onerror = () => { liveStatus.textContent = 'reconnecting...'; liveStatus.classList.remove('on'); };
+
+      // Re-render every 30 s so countdowns update and expired posts disappear
+      setInterval(renderFeed, 30000);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FoodShare - Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FoodShare <span class="tag">Admin</span></div>
+    <div class="user"><span id="user-name"></span> <button class="btn btn-small btn-secondary" id="logout-btn">Log out</button></div>
+  </header>
+
+  <main class="container grid-2">
+    <section class="card">
+      <h2>All posts</h2>
+      <div id="posts" class="list"><p class="muted">Loading...</p></div>
+    </section>
+
+    <section class="card">
+      <h2>Users</h2>
+      <div id="users" class="list"><p class="muted">Loading...</p></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.9/dist/axios.min.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    const postsEl = document.getElementById('posts');
+    const usersEl = document.getElementById('users');
+
+    function renderPost(post) {
+      return `
+        <article class="post">
+          <div class="post-head">
+            <h3>${escapeHtml(post.description)}</h3>
+            <span class="badge badge-${post.status.toLowerCase()}">${post.status}</span>
+          </div>
+          <p class="muted">${escapeHtml(post.quantity)} &middot; posted ${formatTime(post.createdAt)}</p>
+          ${contactHtml('Donor', post.donorContact)}
+          ${post.shelterContact ? contactHtml('Claimed by', post.shelterContact) : ''}
+          <div class="actions">
+            <button class="btn btn-small btn-secondary" data-delete="${post.id}">Delete</button>
+          </div>
+        </article>`;
+    }
+
+    function renderUser(user) {
+      return `
+        <article class="post">
+          <div class="post-head">
+            <h3>${escapeHtml(user.name)}</h3>
+            <span class="badge">${user.role}</span>
+          </div>
+          <p class="muted">${escapeHtml(user.email)} &middot; ${escapeHtml(user.phone)}</p>
+        </article>`;
+    }
+
+    async function loadPosts() {
+      try {
+        const { data } = await api.get('/admin/posts');
+        postsEl.innerHTML = data.length ? data.map(renderPost).join('') : '<p class="muted">No posts yet.</p>';
+      } catch (err) {
+        postsEl.innerHTML = `<p class="error">${escapeHtml(errorMessage(err))}</p>`;
+      }
+    }
+
+    async function loadUsers() {
+      try {
+        const { data } = await api.get('/admin/users');
+        usersEl.innerHTML = data.map(renderUser).join('');
+      } catch (err) {
+        usersEl.innerHTML = `<p class="error">${escapeHtml(errorMessage(err))}</p>`;
+      }
+    }
+
+    postsEl.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-delete]');
+      if (!button || !confirm('Delete this post?')) return;
+      try {
+        await api.delete(`/admin/posts/${button.dataset.delete}`);
+        showToast('Post deleted');
+        loadPosts();
+      } catch (err) {
+        showToast(errorMessage(err), 'error');
+      }
+    });
+
+    (async () => {
+      const user = await requireUser('ADMIN');
+      if (!user) return;
+      showUserName(user);
+      loadPosts();
+      loadUsers();
+    })();
+  </script>
+</body>
+</html>

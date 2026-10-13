@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FoodShare</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FoodShare</div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Leftover food, to the people who need it - fast.</h1>
+      <p>Donors post leftover food. Every shelter within 10 km is alerted instantly, and the first to claim it gets it.</p>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <h2>Log in</h2>
+        <form id="login-form">
+          <label>Email <input type="email" name="email" required></label>
+          <label>Password <input type="password" name="password" required></label>
+          <button type="submit" class="btn">Log in</button>
+          <p class="error" id="login-error"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Create an account</h2>
+        <form id="register-form">
+          <div class="role-picker">
+            <label><input type="radio" name="role" value="DONOR" checked> I'm a donor / event organizer</label>
+            <label><input type="radio" name="role" value="SHELTER"> I'm a shelter / orphanage</label>
+          </div>
+          <label>Name / organization <input type="text" name="name" required></label>
+          <label>Email <input type="email" name="email" required></label>
+          <label>Password <input type="password" name="password" minlength="6" required></label>
+          <label>Phone <input type="tel" name="phone" required></label>
+          <label>Address <input type="text" name="address"></label>
+
+          <div id="shelter-location" class="location-box hidden">
+            <p>Shelters need a location so we can alert you about food within 10 km.</p>
+            <button type="button" class="btn btn-secondary" id="detect-btn">Detect my location</button>
+            <div class="grid-2 tight">
+              <label>Latitude <input type="number" step="any" name="latitude"></label>
+              <label>Longitude <input type="number" step="any" name="longitude"></label>
+            </div>
+          </div>
+
+          <button type="submit" class="btn">Create account</button>
+          <p class="error" id="register-error"></p>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.9/dist/axios.min.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    const shelterLocation = document.getElementById('shelter-location');
+
+    // Already logged in? Go straight to the dashboard.
+    if (localStorage.getItem('token')) {
+      api.get('/auth/me')
+        .then(({ data }) => { window.location.href = pageFor(data); })
+        .catch(() => localStorage.removeItem('token'));
+    }
+
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(loginForm);
+      try {
+        const { data } = await api.post('/auth/login', {
+          email: form.get('email'),
+          password: form.get('password'),
+        });
+        window.location.href = pageFor(saveLogin(data));
+      } catch (err) {
+        document.getElementById('login-error').textContent = errorMessage(err);
+      }
+    });
+
+    registerForm.querySelectorAll('input[name="role"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        shelterLocation.classList.toggle('hidden', registerForm.role.value !== 'SHELTER');
+      });
+    });
+
+    document.getElementById('detect-btn').addEventListener('click', async () => {
+      try {
+        const { latitude, longitude } = await detectLocation();
+        registerForm.latitude.value = latitude.toFixed(6);
+        registerForm.longitude.value = longitude.toFixed(6);
+        showToast('Location detected');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(registerForm);
+      const isShelter = form.get('role') === 'SHELTER';
+      try {
+        const { data } = await api.post('/auth/register', {
+          role: form.get('role'),
+          name: form.get('name'),
+          email: form.get('email'),
+          password: form.get('password'),
+          phone: form.get('phone'),
+          address: form.get('address'),
+          latitude: isShelter && form.get('latitude') ? Number(form.get('latitude')) : null,
+          longitude: isShelter && form.get('longitude') ? Number(form.get('longitude')) : null,
+        });
+        window.location.href = pageFor(saveLogin(data));
+      } catch (err) {
+        document.getElementById('register-error').textContent = errorMessage(err);
+      }
+    });
+  </script>
+</body>
+</html>

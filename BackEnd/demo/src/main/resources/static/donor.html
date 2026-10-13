@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FoodShare - Donor</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FoodShare <span class="tag">Donor</span></div>
+    <div class="user"><span id="user-name"></span> <button class="btn btn-small btn-secondary" id="logout-btn">Log out</button></div>
+  </header>
+
+  <main class="container grid-2">
+    <section class="card">
+      <h2>Post leftover food</h2>
+      <form id="post-form">
+        <label>What food is it?
+          <textarea name="description" rows="3" placeholder="e.g. Veg biryani and dal from a wedding" required></textarea>
+        </label>
+        <label>Quantity <input type="text" name="quantity" placeholder="e.g. Enough for 40 people" required></label>
+        <label>Good until <input type="datetime-local" name="expiresAt" required></label>
+        <div class="location-box">
+          <span id="location-status">Detecting your location...</span>
+          <button type="button" class="btn btn-small btn-secondary" id="retry-location">Retry</button>
+        </div>
+        <button type="submit" class="btn" id="post-btn">Alert nearby shelters</button>
+        <p class="error" id="post-error"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>My posts</h2>
+      <div id="my-posts" class="list"><p class="muted">Loading...</p></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.9/dist/axios.min.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    const postForm = document.getElementById('post-form');
+    const myPostsEl = document.getElementById('my-posts');
+    let location_ = null;
+
+    async function findLocation() {
+      const status = document.getElementById('location-status');
+      status.textContent = 'Detecting your location...';
+      try {
+        location_ = await detectLocation();
+        status.textContent = `Location: ${location_.latitude.toFixed(4)}, ${location_.longitude.toFixed(4)}`;
+      } catch (err) {
+        location_ = null;
+        status.textContent = err.message;
+      }
+    }
+
+    function defaultExpiry() {
+      // 3 hours from now, in the local format datetime-local expects
+      const d = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      return d.toISOString().slice(0, 16);
+    }
+
+    function renderPost(post) {
+      const status = post.status === 'OPEN' && isExpired(post) ? 'EXPIRED' : post.status;
+      return `
+        <article class="post">
+          <div class="post-head">
+            <h3>${escapeHtml(post.description)}</h3>
+            <span class="badge badge-${status.toLowerCase()}">${status}</span>
+          </div>
+          <p class="muted">${escapeHtml(post.quantity)} &middot; good until ${formatTime(post.expiresAt)}</p>
+          ${post.shelterContact
+            ? contactHtml('Claimed by', post.shelterContact)
+            : status === 'OPEN' ? '<p class="muted">Waiting for a shelter to claim it...</p>' : ''}
+        </article>`;
+    }
+
+    async function loadMyPosts() {
+      try {
+        const { data } = await api.get('/posts/mine');
+        myPostsEl.innerHTML = data.length
+          ? data.map(renderPost).join('')
+          : '<p class="muted">You have not posted any food yet.</p>';
+      } catch (err) {
+        myPostsEl.innerHTML = `<p class="error">${escapeHtml(errorMessage(err))}</p>`;
+      }
+    }
+
+    postForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('post-error');
+      errorEl.textContent = '';
+      if (!location_) {
+        errorEl.textContent = 'We need your location - click Retry and allow location access.';
+        return;
+      }
+      const form = new FormData(postForm);
+      const button = document.getElementById('post-btn');
+      button.disabled = true;
+      try {
+        await api.post('/posts', {
+          description: form.get('description'),
+          quantity: form.get('quantity'),
+          expiresAt: new Date(form.get('expiresAt')).toISOString(),
+          latitude: location_.latitude,
+          longitude: location_.longitude,
+        });
+        showToast('Posted! Nearby shelters have been alerted.');
+        postForm.reset();
+        postForm.expiresAt.value = defaultExpiry();
+        loadMyPosts();
+      } catch (err) {
+        errorEl.textContent = errorMessage(err);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.getElementById('retry-location').addEventListener('click', findLocation);
+
+    (async () => {
+      const user = await requireUser('DONOR');
+      if (!user) return;
+      showUserName(user);
+      postForm.expiresAt.value = defaultExpiry();
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+      findLocation();
+      loadMyPosts();
+
+      connectEvents({
+        'post-claimed': (post) => {
+          notify('Your food was claimed!', `${post.shelterContact.name} will pick up "${post.description}"`);
+          loadMyPosts();
+        },
+      });
+      // Refresh every minute so expired posts get marked
+      setInterval(loadMyPosts, 60000);
+    })();
+  </script>
+</body>
+</html>
